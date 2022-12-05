@@ -1,0 +1,3 @@
+[submodule "hardware/RP_Silicon_KiCad"]
+	path = hardware/RP_Silicon_KiCad
+	url = https://github.com/HeadBoffin/RP_Silicon_KiCad.git
