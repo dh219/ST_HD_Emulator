@@ -40,7 +40,7 @@ bool status ( void )
         //{
             printf ( "%s %s - command packets %d\n", 
                 pdrv->pSD->pcName, 
-                pdrv->mounted ? "mounted  " : "unmounted",
+                pdrv->pSD->mounted ? "mounted  " : "unmounted",
                 pdrv->packetCount );
         //}
     }

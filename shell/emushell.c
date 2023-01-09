@@ -18,8 +18,7 @@
 #include "emushell.h"
 
 
-extern int  mountRAW ( void );
-extern int  mountFS  ( void );
+extern int  mountRAW ( int );
 extern bool cpuFreq  ( char* );
 
 extern DRIVES   drv []; 
@@ -123,6 +122,7 @@ void help ( char *command )
  *      help
  *      quit
  *      reboot
+ *      sdtest
  *      status
  *      time
  *      uptime
@@ -187,7 +187,7 @@ bool shellCmd ( char *cmd )
     }
 
     else if ( strncmp (   argv[0],    "date",         4 ) == 0 )
-        ret = emudate ( argv[1] );
+        ret = emudate ( argv[1], 1 );
 
     else if ( strncmp (   argv[0],    "debug",        5 ) == 0 )
     {
@@ -213,12 +213,22 @@ bool shellCmd ( char *cmd )
     
     else if ( strncmp (   argv[0],    "reboot",       6 ) == 0 )
         rebootMCU ();
+
+    if     ( strncmp (   argv[0],     "sdtest",       6 ) == 0 )
+    {
+        if ( argc != 1  )
+            SYNTAX( argv[0] )
+        else
+            sdtest ( argv [1] );
+        
+        ret = BAD;
+    }
     
     else if ( strncmp (   argv[0],    "status",       6 ) == 0 )
         status ();
     
     else if ( strncmp (   argv[0],    "time",         4 ) == 0 )
-        ret = emutime ( argv[1] );
+        ret = emutime ( argv[1], 1 );
     
     else if ( strncmp (   argv[0],    "uptime",       6 ) == 0 )
         ret = uptime ();
