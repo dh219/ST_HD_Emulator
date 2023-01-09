@@ -109,9 +109,9 @@ bool cpuFreq ( char *input )
                         0, 
                         CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS, 
                         clock_get_hz ( clk_sys ), 
-                        clock_get_hz ( clk_sys ) );
+                        133000000 );
 */
-        spi_set_baudrate_fast( spi0, 0 );
+        spi_set_baudrate_fast ( spi0, 0 );
     }
 
     printf ( "\tCPU now running at %d MHz\n", clock_get_hz ( clk_sys ) / 1000000 );

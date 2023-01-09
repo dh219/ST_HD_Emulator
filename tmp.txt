@@ -1,0 +1,32 @@
+-- ICD RTC Communication 
+-- initialisation
+
+c0 BEGIN
+
+c6 BEGIN reg6
+e6 BEGIN SELECT reg6
+c6 BEGIN reg6
+c7 BEGIN reg7
+d7 BEGIN WRITE reg7
+c7 BEGIN reg7
+
+c6 BEGIN reg6
+e6 BEGIN SELECT reg6
+c6 BEGIN reg6
+86 READ  reg6
+
+ff
+ff 
+ff 
+
+c0 BEGIN
+40 END
+
+-----------------------
+
+c0 BEGIN
+
+cc BEGIN reg12
+ec BEGIN SELECT reg12
+cc BEGIN reg12
+8c READ  reg12

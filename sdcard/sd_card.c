@@ -596,8 +596,8 @@ static uint64_t sd_sectors_nolock(sd_card_t *pSD) {
             capacity = (uint64_t)blocknr *
                        block_len;  // memory capacity = BLOCKNR * BLOCK_LEN
             blocks = capacity / _block_size;
-//            DBG_PRINTF("Standard Capacity: c_size: %" PRIu32 "\r\n", c_size);
-//            DBG_PRINTF("Sectors: 0x%llx : %llu\r\n", blocks, blocks);
+            DBG_PRINTF("Standard Capacity: c_size: %" PRIu32 "\r\n", c_size);
+            DBG_PRINTF("Sectors: 0x%llx : %llu\r\n", blocks, blocks);
             DBG_PRINTF("Capacity: 0x%llx : %llu MB\r\n", capacity,
                        (capacity / (1024U * 1024U)));
             break;
@@ -607,8 +607,8 @@ static uint64_t sd_sectors_nolock(sd_card_t *pSD) {
                 ext_bits(csd, 69, 48);       // device size : C_SIZE : [69:48]
             blocks = (hc_c_size + 1) << 10;  // block count = C_SIZE+1) * 1K
                                              // byte (512B is block size)
-//            DBG_PRINTF("SDHC/SDXC Card: hc_c_size: %" PRIu32 "\r\n", hc_c_size);
-//            DBG_PRINTF("Sectors: %8llu\r\n", blocks);
+            DBG_PRINTF("SDHC/SDXC Card: hc_c_size: %" PRIu32 "\r\n", hc_c_size);
+            DBG_PRINTF("Sectors: %8llu\r\n", blocks);
             DBG_PRINTF("Capacity: %llu MB\r\n", (blocks / (2048U)));
             break;
 
@@ -1012,15 +1012,15 @@ static int sd_init_card2(sd_card_t *pSD) {
             // High Capacity card
             if (response & OCR_HCS_CCS) {
                 pSD->card_type = SDCARD_V2HC;
-                DBG_PRINTF("SD Card Initialized: SDHC Card\r\n");
+                //DBG_PRINTF("SD Card Initialized: SDHC Card\r\n");
             } else {
-                DBG_PRINTF(
-                    "SD Card Initialized: SDSC Card\r\n");
+                //DBG_PRINTF(
+                //    "SD Card Initialized: SDSC Card\r\n");
             }
         }
     } else {
         pSD->card_type = SDCARD_V1;
-        DBG_PRINTF("SD Card Initialized: Version 1.x Card\r\n");
+        //DBG_PRINTF("SD Card Initialized: Version 1.x Card\r\n");
     }
 
 #if SD_CRC_ENABLED
@@ -1037,7 +1037,7 @@ static int sd_init_card2(sd_card_t *pSD) {
 
 
 int sd_init_card(sd_card_t *pSD) {
-    TRACE_PRINTF("> %s\r\n", __FUNCTION__);
+    //DBG_PRINTF("> %s\r\n", __FUNCTION__);
     if (!sd_init_driver()) {
         pSD->m_Status |= STA_NOINIT;
         return pSD->m_Status;
@@ -1046,22 +1046,25 @@ int sd_init_card(sd_card_t *pSD) {
     //	STA_NODISK = 0x02, /* No medium in the drive */
     //	STA_PROTECT = 0x04 /* Write protected */
 
-
+    //DBG_PRINTF("1\n");
     // Make sure there's a card in the socket before proceeding
     sd_card_detect(pSD);
     if (pSD->m_Status & STA_NODISK) {
         
         return pSD->m_Status;
     }
+    //DBG_PRINTF("2\n");
     // Make sure we're not already initialized before proceeding
     if (!(pSD->m_Status & STA_NOINIT)) {
         
         return pSD->m_Status;
     }
+    //DBG_PRINTF("3\n");
     // Initialize the member variables
     pSD->card_type = SDCARD_NONE;
 
     sd_spi_select(pSD);
+    //DBG_PRINTF("4\n");
 
     int err = sd_init_card2(pSD);
     if (SD_BLOCK_DEVICE_ERROR_NONE != err) {

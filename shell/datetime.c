@@ -20,6 +20,7 @@
 #include <pico/util/datetime.h>
 #include "hardware/rtc.h"
 #include "emushell.h"
+#include "../emu.h"
 
 
 extern int dow ( datetime_t *dt );
@@ -28,7 +29,7 @@ extern int dow ( datetime_t *dt );
 static char days    [7][4] = { "Sun\0", "Mon\0", "Tue\0", "Wed\0", "Thu\0", "Fri\0", "Sat\0" };
 static char months [12][4] = { "Jan\0", "Feb\0", "Mar\0", "Apr\0", "May\0", "Jun\0", "Jul\0", "Aug\0", "Sep\0", "Oct\0", "Nov\0", "Dec\0" };
 
-bool emudate ( char *d )
+bool emudate ( char *d, bool verbose )
 {
     int         l, ret;
     char        dd[3], mm[3], yy[3];
@@ -90,66 +91,67 @@ bool emudate ( char *d )
 
             return ret;
         }
-    }
 
-    sleep_ms (10); 
+        sleep_ms (10); 
+    }
 
     rtc_get_datetime ( &dt );                                                       /* read what we set */
 
-    daystr = calloc ( 4, 1 );
-    monstr = calloc ( 4, 1 );
-
-    //day = dow ( &dt );                          /* 0 - 6 (SUN - SAT) */
-    //dt.dotw = day;
-    strcpy ( daystr, days [dt.dotw] );
-    
-    strncpy ( monstr, months [dt.month - 1], 4 );
-
-    switch ( dt.day )
+    if ( verbose )
     {
-        case 1:                                 /* st */
-        case 21:
-        case 31:
-            memcpy ( estr, endstr[0], 2 );
-            break;
-        case 2:                                 /* nd */
-        case 22:
-            memcpy ( estr, endstr[1], 2 );
-            break;
-        case 3:                                 /* rd */
-        case 23:
-            memcpy ( estr, endstr[2], 2 );
-            break;
-        default:                                /* th */
-            memcpy ( estr, endstr[3], 2 );;
-    }
-    
-    estr[2] = 0;                                /* terminate string */
-    
-    printf( "%s %2d%s %s %4d\n", daystr, dt.day, estr, monstr, dt.year );
-/*
-    if (    ( dt.month == 12 && dt.day >= 25 )
-                ||
-            ( dt.month == 1 && dt.day <= 5 ) ) {
-        printf( "\tMERRY CHRISTMAS" );
+        daystr = calloc ( 4, 1 );
+        monstr = calloc ( 4, 1 );
 
-        if ( dt.day <= 5 && dt.month == 1 ) {
-            printf( " and a HAPPY NEW YEAR\n" );
+        //day = dow ( &dt );                          /* 0 - 6 (SUN - SAT) */
+        //dt.dotw = day;
+        strcpy ( daystr, days [dt.dotw] );
+        
+        strncpy ( monstr, months [dt.month - 1], 4 );
+
+        switch ( dt.day )
+        {
+            case 1:                                 /* st */
+            case 21:
+            case 31:
+                memcpy ( estr, endstr[0], 2 );
+                break;
+            case 2:                                 /* nd */
+            case 22:
+                memcpy ( estr, endstr[1], 2 );
+                break;
+            case 3:                                 /* rd */
+            case 23:
+                memcpy ( estr, endstr[2], 2 );
+                break;
+            default:                                /* th */
+                memcpy ( estr, endstr[3], 2 );;
         }
-        else {
-            printf( "\n" );
-        }
+        
+        estr[2] = 0;                                /* terminate string */
+        
+        printf( "%s %2d%s %s %4d\n", daystr, dt.day, estr, monstr, dt.year );
+    
+        free( monstr );
+        free( daystr );
     }
-*/    
-    free( monstr );
-    free( daystr );
+
+#if ICD_RTC
+    extern uint8_t ICDreg [];
+
+    ICDreg [7]  = dt.day % 10;
+    ICDreg [8]  = dt.day / 10;
+    ICDreg [9]  = dt.month % 10;
+    ICDreg [10] = dt.month / 10;
+    ICDreg [11] = (dt.year - 1900) % 10;
+    ICDreg [12] = (dt.year - 1900) / 10;
+#endif
 
     return GOOD;
 }
 
 
 
-bool emutime ( char *t )
+bool emutime ( char *t, bool verbose )
 {
     int         l, ret;
     char        hh[3], mm[3], ss[3];
@@ -167,49 +169,80 @@ bool emutime ( char *t )
             rtc_get_datetime ( &tm );           /* without this, the date component gets corrupted */
 
             memcpy( hh, &t[0], 2 );
+
             hh[2] = 0;
             hr = atoi (hh);
-            if ( hr < 0 || hr > 23 ) {
+
+            if ( hr < 0 || hr > 23 ) 
+            {
                 printf ( "emutime() hr entry failed - hr = %d\n", hr );
+
                 return ret;
             }
+
             tm.hour = hr;
 
             memcpy( mm, &t[2], 2 );
+
             mm[2] = 0;
             min = atoi (mm);
-            if ( min < 0 || min > 59 ) {
+
+            if ( min < 0 || min > 59 ) 
+            {
                 printf ( "emutime() min entry failed - min = %d\n", min );
+
                 return ret;
             }
+
             tm.min = min;
 
             if ( l == 6 )                       /* setting seconds as well */
             {
                 memcpy( ss, &t[4], 2 );
+
                 ss[2] = 0;
                 sec = atoi (ss);
-                if ( sec < 0 || sec > 59 ) {
+
+                if ( sec < 0 || sec > 59 ) 
+                {
                     printf ( "emutime() sec entry failed - sec = %d\n", sec );
+
                     return ret;
                 }
+
                 tm.sec = sec;
             }
 
             rtc_set_datetime ( &tm );           /* set new time */
         }
+
         else
         {
             printf( "\ttime: Syntax error\n" );
 
             return ret;
         }
+
+        sleep_ms (10); 
     }
 
-    sleep_ms (10);                            
     rtc_get_datetime ( &tm );                   /* read what we have set */
 
-    printf( "%02d:%02d:%02d\n", tm.hour, tm.min, tm.sec );
+    if ( verbose )
+    {
+        printf( "%02d:%02d:%02d\n", tm.hour, tm.min, tm.sec );
+    }
+
+#if ICD_RTC
+    extern uint8_t ICDreg [];
+
+    ICDreg [0]  = tm.sec  % 10;
+    ICDreg [1]  = tm.sec  / 10;
+    ICDreg [2]  = tm.min  % 10;
+    ICDreg [3]  = tm.min  / 10;
+    ICDreg [4]  = tm.hour % 10;
+    ICDreg [5]  = tm.hour / 10;
+#endif
 
     return GOOD;
 }

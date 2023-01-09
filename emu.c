@@ -41,7 +41,6 @@
 #include "emucmd.h"
 #include "emurtc.h"
 #include "shell/emushell.h"
-//#include "emuscsi.h"
 #include "emuinit.h"
 
 
@@ -53,6 +52,17 @@ static int     rawRD    ( CommandDescriptorBlock *, DRIVES * );
 static int     rawWR    ( CommandDescriptorBlock *, DRIVES * );
 static uint8_t rdDMA    ( uint8_t *, uint32_t );
 static uint8_t wrDMA    ( uint8_t *, uint32_t );
+
+#if ICD_RTC
+static void    processICDRTC   ( void );
+
+#if DEBUG_ICDRTC
+static void    printICDRTCbuff ( void );
+volatile bool  doPrintICDRTCbuff;
+#endif
+
+uint8_t ICDRTCbuff [128];
+#endif
 
 
 /* 64 bytes */
@@ -73,18 +83,19 @@ uint8_t INQUIRY_DATA [] =
 };
 
 
-uint8_t  DMAbuffer [512 * 256] __not_in_flash();/* max transfer size 128 KB */
-DRIVES   drv       [MAX_ID + 1];                /* IDs 0 - 6 */
-//int      lastSeek;
-#ifdef DEBUG
-volatile bool     VERBOSE;                      /* enable / disable debug print */
-#endif
-volatile uint32_t intState;                     /* interrupt state save/restore */
-volatile bool     gotRST;
-volatile bool     doPrint;
+uint8_t  DMAbuffer  [512 * 256];                /* max transfer size 128 KB */
+DRIVES   drv        [MAX_DRIVES]; //[MAX_ID + 1];               /* IDs 0 - 6 */
+
 uint32_t gStatus;                               /* used for printing - copy of CDB */
 CommandDescriptorBlock gCDB;                    /* used for printing - copy of CDB */
 
+#ifdef DEBUG
+volatile bool       VERBOSE;                    /* enable / disable debug print */
+#endif
+
+volatile uint32_t   intState;                   /* interrupt state save/restore */
+volatile bool       gotRST;
+volatile bool       doPrint;
 volatile datetime_t gdttm;                      /* global date time structure - update once per minute */
 
 
@@ -107,16 +118,19 @@ void __not_in_flash_func (core1Entry) (void)
     dataBus (DISABLE);
     disableInterrupts ();
 
-    for ( int i = 0; i < MAX_ID; i++ )
+    for ( int i = 0; i < MAX_DRIVES; i++ )
     {
         drv [i].locked      = false;
-        drv [i].mounted     = false;
+        //drv [i].mounted     = false;
         drv [i].packetCount = 0;
-        drv [i].partTotal   = 0;
-        drv [i].raw         = false;
+        //drv [i].partTotal   = 0;
+        //drv [i].raw         = false;
         drv [i].ejected     = false;
         drv [i].prevState   = true;
     }
+
+    emudate ( "", 0 );                          /* initialise ICD RTC date/time array */
+    emutime ( "", 0 );
 
     gpio_put ( CONTROL_BUS_CNTRL, HI );         /* enable control bus so we can listen for commands */
 
@@ -136,7 +150,7 @@ void __not_in_flash_func (core1Entry) (void)
             
             gpio_set_dir_in_masked (ACSI_DATA_MASK); 
 #if DEBUG
-            //printf ( "RESET\n" );
+            printf ( "RESET\n" );
 #endif            
             waitRST ();                         /* wait for RST to go high */
         }
@@ -163,13 +177,7 @@ void __not_in_flash_func (core1Entry) (void)
 
             /* check this command is for this controller 
              * better to do in hardware with a switch selection ? */
-            if ( sCMD.DEVICE.target == TARGET0 || 
-                 sCMD.DEVICE.target == TARGET1 
-#if ICD_RTC
-                    || ( RTC_ENABLED && sCMD.DEVICE.target == TARGET6 ) )
-#else
-                )
-#endif
+            if ( sCMD.DEVICE.target == TARGET0 || sCMD.DEVICE.target == TARGET1 )
             {
                 sCMD.cmdLength = 6;
 
@@ -219,6 +227,17 @@ void __not_in_flash_func (core1Entry) (void)
 
                 getCMD ( &sCMD );               /* process ACSI/SCSI command */
             }
+
+#if ICD_RTC
+            else if ( sCMD.DEVICE.target == TARGET6 && RTC_ENABLED )
+            {
+                memset ( ICDRTCbuff, 0, sizeof (ICDRTCbuff) );
+
+                ICDRTCbuff [0] = sCMD.b [0];       
+
+                processICDRTC ();
+            }
+#endif
 
             else                                /* ignore command, it wasn't for us */
             {                                   /* ATARI will timeout */
@@ -341,23 +360,22 @@ int main ( void )
     buildDateTime ();                           /* use compilation date/time to initialise RTC */
 
     printf ( "%s\n", TITLE );
+    printf ( "Controller ID %d\n", CONTROLLER_ID );
     printf ( "Hardware initialised\n" );
-    printf ( "CPU clock is running at %d MHz\n", clock_get_hz (clk_sys) / 1000000 );
-    /* spi speed can't be read until card is mounted */
-    //printf ( "SPI clock is running at %d MHz\n", spi_get_baudrate ( spi0 ) / 1000000 );
-    printf ( "RTC Jumper is %s\n", gpio_get (RTC_ENABLED) ? "selected" : "not selected" );
+    printf ( "RTC Jumper is %s\n", gpio_get (RTC_ENABLED) ? "ON" : "OFF" );
+    printf ( "CPU clock is running at %d MHz\n\n", clock_get_hz (clk_sys) / 1000000 );
 
-    //if ( rtc_running )
-    //{
-    //    printf ( "set date/time if required via shell\n" );
-    //}
-
-    printf ( "\nACSI HDC Emulator Running ... press ESC for shell\n\n" );
+    printf ( "ACSI HDC Emulator Running ... press ESC for shell\n\n" );
+    
 
 #ifdef DEBUG
     VERBOSE = true;
 #endif
     doPrint = false;                            /* flag to show if debug print is needed */
+
+#if ICD_RTC && DEBUG_ICDRTC
+    doPrintICDRTCbuff = false;
+#endif
 
     sleep_ms (1000);
 
@@ -365,6 +383,9 @@ int main ( void )
 
     gpio_put ( ONBOARD_LED, HI );               /* show we are initialised and running */
 
+    mountRAW (0);                               /* initialise disks */
+    mountRAW (1);
+    
     /* 
      * do something in core 0 :) 
      */
@@ -390,16 +411,22 @@ int main ( void )
         }
 #endif
 
+#if ICD_RTC && DEBUG_ICDRTC
+        if ( doPrintICDRTCbuff )
+        {
+            doPrintICDRTCbuff = false;
+
+            printICDRTCbuff ();
+        }
+#endif
+
         /* enter shell on ESC key */
         if ( getchar_timeout_us (0) == 0x1b )
         {
-            doShell ();                         /* there is a problem here... */
-                                                /* all the time, we are in the shell, we are not checking for sd card removal/insertion */
+            doShell ();                         /* all the time we are in the shell, we are not checking for sd card removal/insertion */
         }
 
         checkSDcards ();                        /* check sd cards insertion state */
-
-        //sleep_ms ( 100 );
     }
 
     return 0;
@@ -411,7 +438,7 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
 {  
     register uint8_t LUN;
     register uint8_t TARGET;
-    DRIVES           *pdrv;
+    DRIVES  *pdrv;
    
 
     /* ============= */
@@ -426,7 +453,7 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
     else
         LUN = CDB-> b [2] >> 5;
 
-    pdrv    = &drv [TARGET]; 
+    pdrv    = &drv [TARGET - CONTROLLER_ID];    /* max of 2 disks 0, 1 */
 
     pdrv->packetCount += 1;                     /* increment packet counter for this drive - just for stats */
 
@@ -442,15 +469,7 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
                 * 
                 * NOTE status byte bits 5-7 = controller number
                 */
-#if ICD_RTC
-            if ( TARGET == TARGET6 )
-            {
-                pdrv->status = ERR_DRV_NO_ERROR;
-            }
-
-            else
-#endif
-            pdrv->status = pdrv->mounted ? ERR_DRV_NO_ERROR : CHECK_CONDITION;
+            pdrv->status = pdrv->pSD->mounted ? ERR_DRV_NO_ERROR : CHECK_CONDITION;
 
             if ( pdrv->status )
             {
@@ -538,7 +557,7 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
         case FORMAT_UNIT:
             pdrv->status = ERR_DRV_NO_ERROR;
            
-            if ( ! pdrv->mounted )
+            if ( ! pdrv->pSD->mounted )
             {
                 pdrv->lastError.status = SCSI_ERR_INV_LUN;
                 pdrv->status           = ERR_CMD_INVALID_DRV;
@@ -552,7 +571,7 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
             break;
 
         case CMD_READ:
-            if ( ! pdrv->mounted || LUN != 0 )
+            if ( ! pdrv->pSD->mounted || LUN != 0 )
             {
                 pdrv->lastError.SK     = SCSI_SK_NOT_READY;
                 pdrv->lastError.ASC    = SCSI_ASC_MEDIUM_NOT_PRESENT;
@@ -570,7 +589,7 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
             break;
 
         case CMD_WRITE:            
-            if ( ! pdrv->mounted || LUN != 0 ) 
+            if ( ! pdrv->pSD->mounted || LUN != 0 ) 
             {
                 pdrv->lastError.SK     = SCSI_SK_NOT_READY;
                 pdrv->lastError.ASC    = SCSI_ASC_MEDIUM_NOT_PRESENT;
@@ -604,18 +623,8 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
             pdrv->status           = ERR_DRV_NO_ERROR;
                
             memcpy ( DMAbuffer, INQUIRY_DATA, sizeof (INQUIRY_DATA) );
-#if ICD_RTC
-            if ( TARGET == TARGET6 )
-            {
-                DMAbuffer [0] = 0x0e;           /* simplified direct access device */
-                DMAbuffer [1] = 0x00;           /* fixed */
 
-                memcpy ( DMAbuffer + 8, "ICD     REAL TIME CLOCK ", 24 );
-            }
-
-            else
             {
-#endif
                 char num [9];
                 int diskSize = (float)((float)(pdrv->pSD->sectors * 512) / 1000.0 / 1000.0 / 1000.0) + 0.5;
 
@@ -636,9 +645,8 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
 
                 if ( LUN != 0 )
                     DMAbuffer [0] = 0x7f;       /* this is causing me problems ??? hangs bus */
-#if ICD_RTC
-            }            
-#endif
+            }
+
             if ( CDB->len < 64 )
                 DMAbuffer [4] = CDB->len - 5;
                 
@@ -796,25 +804,12 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
                             pdrv->status           = ERR_DRV_NO_ERROR;
                             
                             memcpy ( DMAbuffer, INQUIRY_DATA, sizeof (INQUIRY_DATA) );
-#if ICD_RTC
-                            if ( TARGET == TARGET6 )
-                            {
-                                DMAbuffer [0] = 0x0e;           /* simplified direct access device */
-                                DMAbuffer [1] = 0x00;           /* fixed */
+                          
+                            DMAbuffer [0] = 0x00;       /* device connected and is a direct access block device */
 
-                                memcpy ( DMAbuffer + 8, "ICD     REAL TIME CLOCK ", 24 );
-                            }
+                            if ( LUN != 0 )
+                                DMAbuffer [0] = 0x7f;       /* this is causing me problems ??? hangs bus */
 
-                            else
-                            {
-#endif                           
-                                DMAbuffer [0] = 0x00;       /* device connected and is a direct access block device */
-
-                                if ( LUN != 0 )
-                                    DMAbuffer [0] = 0x7f;       /* this is causing me problems ??? hangs bus */
-#if ICD_RTC
-                            }            
-#endif
                             if ( CDB->len < sizeof (INQUIRY_DATA) )
                                 DMAbuffer [4] = CDB->len - 5;
 
@@ -834,7 +829,7 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
 
                             memset ( DMAbuffer, 0, 16 );
 
-                            if ( pdrv->mounted )
+                            if ( pdrv->pSD->mounted )
                             {
                                 uint32_t sectors = pdrv->pSD->sectors - 1;
 
@@ -854,7 +849,7 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
 
                         /* 0x28 SCSI Read */
                         case SCSI_OP_READ:
-                            if ( pdrv->mounted && LUN == 0 )
+                            if ( pdrv->pSD->mounted && LUN == 0 )
                             {
                                 pdrv->lba =  (uint32_t)CDB->b [3] << 24 | 
                                              (uint32_t)CDB->b [4] << 16 | 
@@ -878,7 +873,7 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
 
                         /* 0x2a SCSI WRITE */
                         case SCSI_OP_WRITE:
-                            if ( pdrv->mounted && LUN == 0 )
+                            if ( pdrv->pSD->mounted && LUN == 0 )
                             {
                                 pdrv->lba = (uint32_t)CDB->b [3] << 24 | 
                                             (uint32_t)CDB->b [4] << 16 | 
@@ -1064,7 +1059,7 @@ static inline uint8_t __not_in_flash_func (wrDMA) ( uint8_t *ptr, uint32_t lengt
 /* ------------------------------------------------------------------------- */
 
 
-static inline int __not_in_flash_func (rawRD) ( CommandDescriptorBlock *cdb, DRIVES *drv )
+static inline int rawRD ( CommandDescriptorBlock *cdb, DRIVES *drv )
 {  
     int e;
     uint32_t length;
@@ -1112,7 +1107,7 @@ static inline int __not_in_flash_func (rawRD) ( CommandDescriptorBlock *cdb, DRI
 
 
 
-static inline int __not_in_flash_func (rawWR) ( CommandDescriptorBlock *cdb, DRIVES *drv )
+static inline int rawWR ( CommandDescriptorBlock *cdb, DRIVES *drv )
 {
     int e;
     uint32_t length;
@@ -1153,3 +1148,213 @@ static inline int __not_in_flash_func (rawWR) ( CommandDescriptorBlock *cdb, DRI
 
     disableInterrupts ();
 }
+
+/* ------------------------------------------------------------------------- */
+
+#if ICD_RTC
+
+#define ICD_BEGIN   0xc0
+#define ICD_READ    0x80
+#define ICD_END     0x40
+#define ICD_SELECT  0x20
+#define ICD_WRITE   0x10
+
+#define ICDREGS     13
+
+/* initialise ICD RTC to 25/12/22 23:34:12 */
+uint8_t ICDreg [ICDREGS] = 
+{
+    2,                                          /* seconds low  */
+    1,                                          /* seconds high */
+    4,                                          /* minutes low  */
+    3,                                          /* minutes high */
+    3,                                          /* hours low    */
+    2,                                          /* hours high   */
+    0,                                          /* day of week (0-6) - NOT USED */
+    5,                                          /* day low      */
+    2,                                          /* day high     */
+    2,                                          /* month low    */
+    1,                                          /* month high   */
+    2,                                          /* year low     */
+    4 //12                                          /* year high - from 1980, so 4 * 10 = 40 = 2020 + year low */
+};
+
+static void    processICDRTC ( void )
+{
+    uint8_t ICDcmd;
+    uint8_t ICDdata;
+    uint8_t reg;
+    uint8_t ix  = 0;
+    bool    expectWrite = false;
+    uint8_t cmd = ICDRTCbuff [0] & 0x1f;
+
+
+    switch ( cmd )
+    {
+        case REQUEST_SENSE:
+
+            IRQ_LO ();
+            waitA1 (); 
+
+            for ( int d = 1; d < 6; d++ )
+            {       
+                waitCS (); 
+                IRQ_HI ();  
+                ICDRTCbuff [d] = rdDataBus ();
+                waitRW (LO);         
+                
+                if ( d == 5 )
+                    break;
+                                    
+                IRQ_LO ();
+            } 
+
+            memset ( DMAbuffer, 0, ICDRTCbuff [4] );
+
+            DMAbuffer [0] = 0x70;   
+            DMAbuffer [1] = 0;
+            DMAbuffer [2] = SCSI_SK_NO_SENSE; 
+            DMAbuffer [3] = 0;
+            DMAbuffer [7] = 12;
+            DMAbuffer [8]  = 0;
+            DMAbuffer [9]  = 0x0a;
+            DMAbuffer [10] = 0x80; 
+            DMAbuffer [11] = 0; 
+            DMAbuffer [12] = SCSI_ASC_NO_ADDITIONAL_SENSE;
+            DMAbuffer [13] = SCSI_ASCQ_NO_ADDITIONAL_SENSE_INFORMATION;
+            DMAbuffer [14] = 0;
+            DMAbuffer [15] = 0;
+            DMAbuffer [16] = 0;
+            DMAbuffer [17] = 0;
+            DMAbuffer [18] = 0; 
+            DMAbuffer [19] = 0;               
+
+            wrDMA ( DMAbuffer, ICDRTCbuff [4] );
+
+            break;
+
+        case CMD_INQUIRY:
+
+            IRQ_LO ();
+            waitA1 (); 
+
+            for ( int d = 1; d < 6; d++ )
+            {       
+                waitCS (); 
+                IRQ_HI ();  
+                ICDRTCbuff [d] = rdDataBus ();
+                waitRW (LO);         
+                
+                if ( d == 5 )
+                    break;
+                                    
+                IRQ_LO ();
+            } 
+
+            memcpy ( DMAbuffer, INQUIRY_DATA, sizeof (INQUIRY_DATA) );
+
+            DMAbuffer [0] = 0x0e;               /* simplified direct access device */
+            DMAbuffer [1] = 0x00;               /* fixed */
+
+            memcpy ( DMAbuffer + 8, "ICD     REAL TIME CLOCK ", 24 );
+
+            if ( ICDRTCbuff [4] < 64 )
+                DMAbuffer [4] = ICDRTCbuff [4] - 5;
+            
+            wrDMA ( DMAbuffer, ICDRTCbuff [4] );
+
+            sleep_us (1);
+            doStatus (0);
+
+            break;
+
+        case TEST_UNIT_READY:
+
+            ix = 1;
+
+            IRQ_LO ();
+            waitA1 ();
+
+            while ( ix < sizeof (ICDRTCbuff) )
+            {
+                waitCS ();
+                IRQ_HI ();
+                ICDcmd = rdDataBus ();
+                waitRW (LO);
+
+                ICDRTCbuff [ix++] = ICDcmd;
+
+                if ( ICDcmd == ICD_END )
+                {
+                    break;
+                }
+
+                IRQ_LO ();
+
+                if ( ICDcmd == ICD_BEGIN )//|| ICDcmd == 0x00 || ICDcmd == 0xff )
+                {
+                    continue;
+                }
+
+                if ( (ICDcmd & 0xf0) == (ICD_BEGIN | ICD_SELECT) )
+                {
+                    reg = ICDcmd & 0x0f;
+                }
+
+                else if ( (ICDcmd & 0xf0) == ICD_READ )
+                {
+                    sleep_us (1);
+                    doStatus ( ICDreg [reg] );
+                }
+                
+                else if ( (ICDcmd & 0xf0) == (ICD_BEGIN | ICD_WRITE) )
+                {
+                    ICDdata = ICDcmd & 0x0f;
+                    expectWrite = true;
+                }
+                
+                else if ( expectWrite )
+                {
+                    expectWrite = false;
+                    ICDreg [reg] = ICDdata;
+                }
+            }
+
+            doStatus (0);
+#if DEBUG_ICDRTC
+            doPrintICDRTCbuff = true;
+#endif   
+            break;
+
+        default:
+            sleep_us (1);
+            doStatus (2);
+            printf ( "%s: need to handle command 0x%02x\n", __func__, cmd );
+#if DEBUG_ICDRTC
+            doPrintICDRTCbuff = true;
+#endif
+            break;
+    }
+
+}
+
+
+#if DEBUG_ICDRTC
+static void    printICDRTCbuff ( void )
+{
+    for ( int i = 0; i < 128; i++ )
+    {
+        if ( i % 16 == 0 )
+            printf ( "\n" );
+
+        printf ( "%02x ", ICDRTCbuff [i] );
+
+        if ( ICDRTCbuff [i] == 0x40 )
+            break;
+    }
+    
+    printf ( "\n" );
+}
+#endif
+
+#endif

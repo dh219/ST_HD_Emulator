@@ -28,6 +28,7 @@ add_executable(
 	shell/emumount.c
 	shell/cpdisk.c
 	shell/debug.c
+	shell/sdtest.c
 	)
 
 target_link_libraries( 

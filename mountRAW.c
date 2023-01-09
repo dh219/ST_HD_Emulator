@@ -22,7 +22,7 @@
 extern DRIVES drv[];
 
 
-int rawPartitionCount ( DRIVES *pdrv )
+int rawPartitionCount ( sd_card_t *pdrv )//DRIVES *pdrv )
 {
 	unsigned char *pinfo, bootsector[512];
 	uint32_t start, sectors, total = 0;
@@ -30,7 +30,7 @@ int rawPartitionCount ( DRIVES *pdrv )
     int lba = 0;
     
 
-    if ( ( i = sd_read_blocks ( pdrv->pSD, bootsector, lba, 1 ) ) != SD_BLOCK_DEVICE_ERROR_NONE )
+    if ( ( i = sd_read_blocks ( pdrv, bootsector, lba, 1 ) ) != SD_BLOCK_DEVICE_ERROR_NONE )
 	{
 		printf( "rawPartitionCount: read error %d\n", i );
 
@@ -74,21 +74,14 @@ int rawPartitionCount ( DRIVES *pdrv )
             
             start = ((uint32_t)pinfo [11] << 24) | ((uint32_t)pinfo [10] << 16) | ((uint32_t)pinfo [9] << 8) | pinfo [8];      /*  partition start sector in 32bit LBA format */
 			sectors = ((uint32_t)pinfo [15] << 24) | ((uint32_t)pinfo [14] << 16) | ((uint32_t)pinfo [13] << 8) | pinfo [12];  /* partition size in sectors */
-			
-            //total += sectors;
- 			
+		 			
             if ( ptype && (ptype != 0x05 && ptype != 0x0f) )
             {
                 total += sectors;
 
                 printf ( "DOS MBR - Partition %d: type=0x%02x, start=0x%08x, size=%.1f MB %s%s\n",
                     i, ptype, start, sectors/2048.0, boot ? "(boot)" : "", sectors ? "" : "(invalid)");
-                
-                //pdrv->luns [parts].startSector = start;
-                //pdrv->luns [parts].sectorCount = sectors;
-                //pdrv->luns [parts].lun         = parts;
-                //pdrv->luns [parts].mounted     = true;
-                
+                                
 				parts++;
             }
 //#ifdef TODO
@@ -101,7 +94,7 @@ int rawPartitionCount ( DRIVES *pdrv )
                 uint32_t epstart, epsectors;
                 
 
-                if ( ( i = sd_read_blocks ( pdrv->pSD, extpart, start, 1 ) ) != SD_BLOCK_DEVICE_ERROR_NONE )
+                if ( ( i = sd_read_blocks ( pdrv, extpart, start, 1 ) ) != SD_BLOCK_DEVICE_ERROR_NONE )
                 {
                     printf ( "2nd read failed %d\n", i );
 
@@ -123,11 +116,6 @@ int rawPartitionCount ( DRIVES *pdrv )
 
                             printf ( "DOS EBR - Extended Partition %d: type=0x%02x, start=0x%08x, size=%.1f MB %s%s\n",
                                 parts, eptype, epstart, epsectors/2048.0, epboot ? "(boot)" : "", epsectors ? "" : "(invalid)");
-
-                            //pdrv->luns [parts].startSector = epstart;
-                            //pdrv->luns [parts].sectorCount = epsectors;
-                            //pdrv->luns [parts].lun         = parts;
-                            //pdrv->luns [parts].mounted     = true;
                             
                             parts++;
                         }
@@ -143,7 +131,7 @@ int rawPartitionCount ( DRIVES *pdrv )
                             uint32_t eepstart, eepsectors;
                             
 
-                            if ( ( i = sd_read_blocks ( pdrv->pSD, eextpart, epstart, 1 ) ) != SD_BLOCK_DEVICE_ERROR_NONE )
+                            if ( ( i = sd_read_blocks ( pdrv, eextpart, epstart, 1 ) ) != SD_BLOCK_DEVICE_ERROR_NONE )
                             {
                                 printf ( "2nd read failed %d\n", i );
 
@@ -165,11 +153,6 @@ int rawPartitionCount ( DRIVES *pdrv )
 
                                         printf ( "DOS EBR - Extended Partition %d: type=0x%02x, start=0x%08x, size=%.1f MB %s%s\n",
                                             parts, eeptype, eepstart, eepsectors/2048.0, eepboot ? "(boot)" : "", eepsectors ? "" : "(invalid)");
-
-                                        //pdrv->luns [parts].startSector = eepstart;
-                                        //pdrv->luns [parts].sectorCount = eepsectors;
-                                        //pdrv->luns [parts].lun         = parts;
-                                        //pdrv->luns [parts].mounted     = true;
                                         
                                         parts++;
                                     }
@@ -192,9 +175,8 @@ int rawPartitionCount ( DRIVES *pdrv )
         
         if ( parts )
         {   
-            pdrv->diskSize = total;
-            //printf ( "disk size is %u\n", pdrv->diskSize );
-            //printf ( "total is %u\n", total );
+            //pdrv->diskSize = total;
+            
 		    printf( "Total size: %.1f MB in %d partitions\n", total/2048.0, parts);
         }
 	}
@@ -229,17 +211,11 @@ int rawPartitionCount ( DRIVES *pdrv )
                 
                 pid[3] = '\0';
                 extended = strcmp("XGM", pid) == 0;
-                //pdrv->luns [parts].startSector = HDC_ReadInt32(pinfo, 4);
-                //pdrv->luns [parts].sectorCount = HDC_ReadInt32(pinfo, 8);
-                //pdrv->luns [parts].lun         = parts;
-                //pdrv->luns [parts].mounted     = true;
                     
                 printf( "ATARI MBR "
                     "- Partition %d: ID=%s, start=0x%08x, size=%.1f MB, flags=0x%x %s%s\n",
                     parts, pid, 
-                    //pdrv->luns [parts].startSector,
                     HDC_ReadInt32(pinfo, 4),
-                    //pdrv->luns [parts].sectorCount / 2048.0,
                     HDC_ReadInt32(pinfo, 8) / 2048.0,
                     flags,
                     (flags & 0x80) ? "(boot)": "",
@@ -252,61 +228,67 @@ int rawPartitionCount ( DRIVES *pdrv )
         if ( parts )
         {
 		    total = HDC_ReadInt32(bootsector, 0x1C2);
-            pdrv->diskSize = total;
-            //printf ( "disk size is %u\n", pdrv->diskSize );
+            //pdrv->diskSize = total;
 
 		    printf ( "- Total size: %.1f MB in %d partitions\n", total / 2048.0, parts );
         }
 	}
     
-    if ( parts )
-    {
+    //if ( parts )
+    //{
         pdrv->mounted = true;
-        pdrv->raw     = true;                   /* raw  partioned */
-    }
+        //pdrv->mounted = true;
+       // pdrv->raw     = true;                   /* raw  partioned */
+    //}
 
-    else
-    {
-        pdrv->mounted = false;
-        pdrv->raw     = false;
-    }
+    //else
+    //{
+    //    pdrv->mounted = false;
+    //    pdrv->raw     = false;
+    //}
 
-    pdrv->partTotal = parts;
+    //pdrv->partTotal = parts;
+    return total;
 }
     
 
 extern sd_card_t sd_cards[];
 
-int mountRAW ( void )
+int mountRAW ( int disk )
 {
     int t = 0;
+    int status;
+    sd_card_t *pdrv; 
 
 
-    for ( int n = 0; n < MAX_DRIVES; n++ )
-    {
-        drv [n].pSD = &sd_cards [n];
+    //for ( int n = 0; n < MAX_DRIVES; n++ )
+    //{        
+        drv [disk].pSD = &sd_cards [disk];
 
-        if ( gpio_get (drv [n].pSD->card_detect_gpio) == false && drv [n].mounted == false )    /* check micro-sd card is inserted */
+        pdrv = drv [disk].pSD;
+
+        if ( gpio_get (pdrv->card_detect_gpio) == false && pdrv->mounted == false )    /* check micro-sd card is inserted */
         {
             sleep_ms (1);
 
-            if ( sd_init_card ( drv [n].pSD ) == 0 )
+            if ( (status = sd_init_card ( pdrv ) ) == 0 )
             {
-                rawPartitionCount ( &drv [n] );
+                drv [disk].diskSize = rawPartitionCount ( pdrv );
+                printf ( "%s diskSize = %d\n", __func__, drv [disk].diskSize );
                 
-                if ( drv [n].mounted )
+                if ( pdrv->mounted )
                 {
-                    printf ( "\n%s mounted\n\n", drv [n].pSD->pcName );
+                    printf ( "\n%s mounted\n\n", pdrv->pcName );
                     t++;
                 }
             }
             
             else
             {
-                printf ( "\nERROR: mountRAW init card failed on %s\n", drv [n].pSD->pcName );
+                printf ( "\nERROR: mountRAW init card failed on %s\n", pdrv->pcName );
             }
         }
-    }  
+    //}  
     
     return t;                                   /* return number of mounted drives */
 }

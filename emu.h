@@ -170,7 +170,8 @@ Pin	Name	Description
 
 /* build options */
 #define DEBUG               1                   /* enable debug stuff */
-#define ICD_RTC             0                   /* include ICD RTC */
+#define ICD_RTC             1                   /* include ICD RTC - will only be used if ICD driver is used */
+#define DEBUG_ICDRTC        0                   /* ICD RTC debug */
 #define USEDMA              1                   /* use DMA transfers for SPI - sdcard/spi.h also needs this define */
 #define PROJECT_HARDWARE    0                   /* set when using project hardware */
 #define PICO_W              0                   /* set when running on a Raspberry PI PICO-W */
@@ -229,7 +230,7 @@ Pin	Name	Description
 
 
 /* Emulator configuration */
-#define CONTROLLER_ID       0                   /* we identify as this ID - MAX ID 3 */
+#define CONTROLLER_ID       0                   /* we identify as this ID - MAX ID 6 */
                                                 /* NOTE the hardware is limited to setting IDs 0-3 only */
                                                 /* ID + 1 is assigned though eg. select ID 3, ID3 AND ID4 will be used */
 #define TARGET0             CONTROLLER_ID       /* Hard Drive Emulator Controller Address 1st SD card */
@@ -256,10 +257,13 @@ Pin	Name	Description
                                                 /* 1.5  sd-card optimisations - added local sdcard and spi interface files */
                                                 /* 1.51 code optimisations all over and code tidy-up                       */
                                                 /* 1.52 added GPIO 28 to enable control bus                                */
+                                                /* 1.6  ICD RTC emulation added                                            */
+                                                /* 1.61 fixed disk mount problem                                           */
 
-#define VERSION             "1.52"              /* major.minor max length 4 */
+#define VERSION             "1.61"              /* major.minor max length 4 */
 #define TITLE               "\n\033[2J" \
                             "********************************\n" \
+                            "BBaN RPP HDC\n" \
                             "ATARI ACSI HDC Emulator\n" \
                             __DATE__"  "__TIME__\
                             "\nBuild "\
@@ -311,6 +315,7 @@ Pin	Name	Description
  #define disableInterrupts() ;
 #endif
 
+
 /* 
  * disk drive structures 
  *
@@ -328,8 +333,8 @@ typedef struct DRIVE_INFO
 
     uint8_t   status;                           /* drive current status */
     uint8_t   lastStatus;
-    bool      mounted;                          /* true = drive mounted */
-    bool      raw;                              /* true = a partioned micro-sd card, false = FAT32 *.img files */
+    //bool      mounted;                          /* true = drive mounted */
+    //bool      raw;                              /* true = a partioned micro-sd card, false = FAT32 *.img files */
     bool      ejected;                          /* true = disk eject command issued */
     bool      prevState;                        /* false = inserted, true = removed */
     bool      locked;                           /* prevent / allow media removal - true = locked (prevent) */
@@ -338,7 +343,7 @@ typedef struct DRIVE_INFO
     uint32_t     lba;                           /* logical block address passed in by the command */
     uint32_t     len;                           /* data length for extended SCSI commands */
 
-    uint8_t   partTotal;                        /* partitions on drive */
+    //uint8_t   partTotal;                        /* partitions on drive */
     
     sd_card_t *pSD;
     uint32_t  packetCount;                      /* keep a tally of the command count for drive - just for stats */
@@ -348,8 +353,7 @@ typedef struct DRIVE_INFO
 DRIVES;
 
 
-extern int      mountRAW        ( void );
-extern int      mountFS         ( void );
+extern int      mountRAW        ( int );
 extern bool     sd_init_driver  ();
 extern int      sd_init_card    ( sd_card_t *);
 extern int      sd_write_blocks ( sd_card_t *, const uint8_t *, uint64_t, uint32_t);

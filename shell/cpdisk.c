@@ -56,21 +56,21 @@ bool cpdisk ( char *src, char *dst )
         dstdsk = dst [strlen (dst) - 1] - '0';
         pdstdrv = drv [dstdsk].pSD;
 
-        if ( drv [srcdsk].mounted )
+        if ( psrcdrv->mounted )
         {
-            if ( drv [dstdsk].mounted )
+            if ( pdstdrv->mounted )
             {
                 /* start copy */
                 printf ( "Copying %s to %s\n", src, dst );
 
-                tx = ( (drv [srcdsk].diskSize * 512) / 131072) + 1;   /* number of transfers using 128k buffer */
+                tx    = psrcdrv->sectors + 1;   
                 start = time_us_64 ();
 
-                for ( int n = 0; n < tx; n++ )
+                for ( uint32_t n = 0; n < tx; n++ )
                 {
-                    if ( ( e = sd_read_blocks ( drv [srcdsk].pSD, DMAbuffer, n * 256, 256 )) == SD_BLOCK_DEVICE_ERROR_NONE )
+                    if ( ( e = sd_read_blocks ( psrcdrv, DMAbuffer, n, 1 )) == SD_BLOCK_DEVICE_ERROR_NONE )
                     {
-                        if ( ( e = sd_write_blocks ( drv [dstdsk].pSD, DMAbuffer, n * 256, 256 )) == SD_BLOCK_DEVICE_ERROR_NONE )
+                        if ( ( e = sd_write_blocks ( pdstdrv, DMAbuffer, n, 1 )) == SD_BLOCK_DEVICE_ERROR_NONE )
                         {
                             printf ( " %%%3.1f complete\r", ((float)n / (float)tx) * 100 );
                         }
@@ -85,13 +85,13 @@ bool cpdisk ( char *src, char *dst )
                     {
                         printf ( "\ncpdisk: read error %d\n", e );
                     }
-                    
                 }
 
                 duration = (time_us_64 () - start) / 1000000;       /* seconds */
+
                 printf ( "\n" );
                 printf ( "Copy completed in %u seconds\n", duration );
-                printf ( "%.1f KB/s\n", (float)((drv [srcdsk].diskSize * 512) / 1024 ) / (float)duration );
+                printf ( "%.1f KB/s\n", (float)((psrcdrv->sectors * 512) / 1024 ) / (float)duration );
             }
 
             else
