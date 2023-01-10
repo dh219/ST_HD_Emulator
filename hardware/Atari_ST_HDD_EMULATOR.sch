@@ -693,7 +693,7 @@ NoConn ~ 1300 5300
 Text GLabel 1300 5200 0    50   Input ~ 0
 ADRQ
 $Comp
-L Connector_Generic:Conn_02x10_Top_Bottom J2
+L Connector_Generic:Conn_02x10_Odd_Even J2
 U 1 1 638914B0
 P 1600 4800
 F 0 "J2" H 1650 5417 50  0000 C CNN
