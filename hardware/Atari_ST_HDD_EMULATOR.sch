@@ -5,10 +5,10 @@ $Descr A3 16535 11693
 encoding utf-8
 Sheet 1 1
 Title "ATARI ACSI HARD DRIVE CONTROLLER EMULATOR"
-Date "2023-01-10"
-Rev "1.0_DH219"
+Date "2023-01-11"
+Rev "1.0_dh219"
 Comp ""
-Comment1 "Author: D Henderson based on a design by Steve Bradford"
+Comment1 "Copyright 2023 D Henderson based on a design by Steve Bradford"
 Comment2 ""
 Comment3 ""
 Comment4 ""
@@ -1475,4 +1475,14 @@ Text Notes 1250 6450 0    50   ~ 0
 USE EITHER TXB0108 OR SN74CB3T3245 BUT NOT BOTH
 Text Notes 3450 850  0    50   ~ 0
 USE EITHER TXB0108 OR SN74CB3T3245 BUT NOT BOTH
+Text Notes 13150 7850 0    50   ~ 0
+Mistake here -- these are non-inverting!
+Wire Notes Line
+	12850 7900 15050 7900
+Wire Notes Line
+	15050 7900 15050 9750
+Wire Notes Line
+	15050 9750 12850 9750
+Wire Notes Line
+	12850 9750 12850 7900
 $EndSCHEMATC
