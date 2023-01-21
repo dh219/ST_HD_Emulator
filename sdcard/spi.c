@@ -53,12 +53,12 @@ bool my_spi_init(spi_t *pSPI) {
         spi_init(pSPI->hw_inst, 400 * 1000);
         spi_set_format(pSPI->hw_inst, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
 
-        gpio_set_function(pSPI->miso_gpio, GPIO_FUNC_SPI);
-        gpio_set_function(pSPI->mosi_gpio, GPIO_FUNC_SPI);
-        gpio_set_function(pSPI->sck_gpio, GPIO_FUNC_SPI);
+        //gpio_set_function(pSPI->miso_gpio, GPIO_FUNC_SPI);
+        //gpio_set_function(pSPI->mosi_gpio, GPIO_FUNC_SPI);
+        //gpio_set_function(pSPI->sck_gpio, GPIO_FUNC_SPI);
 
         // SD cards' DO MUST be pulled up.
-        gpio_pull_up(pSPI->miso_gpio);
+        //gpio_pull_up(pSPI->miso_gpio);
 
 #if USEDMA
         // Grab some unused dma channels

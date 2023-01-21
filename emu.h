@@ -170,12 +170,13 @@ Pin	Name	Description
 
 /* build options */
 #define DEBUG               1                   /* enable debug stuff */
-#define ICD_RTC             1                   /* include ICD RTC - will only be used if ICD driver is used */
+#define ICD_RTC             0                   /* include ICD RTC - will only be used if ICD driver is used */
 #define DEBUG_ICDRTC        0                   /* ICD RTC debug */
 #define USEDMA              1                   /* use DMA transfers for SPI - sdcard/spi.h also needs this define */
-#define PROJECT_HARDWARE    0                   /* set when using project hardware */
-#define PICO_W              0                   /* set when running on a Raspberry PI PICO-W */
-
+#define PROJECT_HARDWARE    0                   /* set when using project hardware  0 = PROTOTYPE */
+#define PICO_W              0                   /* set when running on a Raspberry PI PICO-W OOOOOO what could be coming ??? */
+#define WRITE_ENABLE        1                   /* 0 disable writes if debugging problems */
+#define DEBUG_IO            0
 
 /* GPIO assignments by GPIO number */
 #define D0                  0                   /* GPIO 00-07 bi-directional */
@@ -244,9 +245,14 @@ Pin	Name	Description
 #define LO                  0                   /* signal level, 0v */
 #define HI                  1                   /* signal level, vcc */
 
+                                                /* 74lvc245 chips need OE low whilst the txb0108 chips need OE high */
+#if PROJECT_HARDWARE
 #define ENABLE              1                   /* enable bidirectional voltage level translator chip */
 #define DISABLE             0                   /* disable bidirectional voltage level translator chip - tristate */
-
+#else
+#define ENABLE              0                   /* enable bidirectional voltage level translator chip */
+#define DISABLE             1                   /* disable bidirectional voltage level translator chip - tristate */
+#endif
 
                                                 /* 1.0  Initial release                                                    */
                                                 /* 1.1  altered for multiple sd-cards                                      */
@@ -259,8 +265,8 @@ Pin	Name	Description
                                                 /* 1.52 added GPIO 28 to enable control bus                                */
                                                 /* 1.6  ICD RTC emulation added                                            */
                                                 /* 1.61 fixed disk mount problem                                           */
-
-#define VERSION             "1.61"              /* major.minor max length 4 */
+                                                /* 1.7  HW design problems. Can not use TXB0108 part */
+#define VERSION             "1.7"              /* major.minor max length 4 */
 #define TITLE               "\n\033[2J" \
                             "********************************\n" \
                             "BBaN RPP HDC\n" \
@@ -277,20 +283,29 @@ Pin	Name	Description
 #define DRQ_HI()            gpio_put (DRQ, HI);
 
 #define dataBus(s)          gpio_put (DATA_BUS_CNTRL, s)
-#define newCMD()            gpio_get (A1) == LO && gpio_get (RW) == LO // future will be gpio_get (CONTROLLER_SELECT) == HI
+#define controlBus(s)       gpio_put (CONTROL_BUS_CNTRL, s)
+
+#if PROJECT_HARDWARE
+#define newCMD()            (gpio_get (A1) == LO && gpio_get (RW) == LO)
+//#define newCMD()            (gpio_get (CONTROLLER_SELECT) == HI)
+
+#else
+#define newCMD()            (gpio_get (A1) == LO && gpio_get (RW) == LO)
+#endif
+
 #define rdDataBus()         (gpio_get_all () & ACSI_DATA_MASK)
 #define wrDataBus(d)        gpio_put_masked ( ACSI_DATA_MASK, (d) )
 #define checkRST()          {                               \
                                 if ( gpio_get (RST) == LO ) \
                                     gotRST = true;          \
                             }
-#define checkCS()           while ( gpio_get ( CS ) == LO )
-#define waitCS()            while ( gpio_get ( CS ) == HI )
-#define waitRW(s)           while ( gpio_get ( RW ) == s )
-#define waitACK(s)          while ( gpio_get ( ACK ) == s )
-#define waitRD()            while ( gpio_get ( RW ) == LO )
-#define waitWR()            while ( gpio_get ( RW ) == HI )
-#define waitA1()            while ( gpio_get ( A1 ) == LO )
+#define checkCS()           while ( gpio_get ( CS  ) == LO )
+#define waitCS()            while ( gpio_get ( CS  ) == HI )
+#define waitRW(s)           while ( gpio_get ( RW  ) == s  )
+#define waitACK(s)          while ( gpio_get ( ACK ) == s  )
+#define waitRD()            while ( gpio_get ( RW  ) == LO )
+#define waitWR()            while ( gpio_get ( RW  ) == HI )
+#define waitA1()            while ( gpio_get ( A1  ) == LO )
 #define waitRST()           while ( gpio_get ( RST ) == LO )
 
 #define usDelay(x)          {                                           \

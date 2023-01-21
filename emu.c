@@ -53,6 +53,11 @@ static int     rawWR    ( CommandDescriptorBlock *, DRIVES * );
 static uint8_t rdDMA    ( uint8_t *, uint32_t );
 static uint8_t wrDMA    ( uint8_t *, uint32_t );
 
+#ifdef DEBUG_IO
+void checkIRQDRQ ( void );
+void checkInputs ( void );
+#endif
+
 #if ICD_RTC
 static void    processICDRTC   ( void );
 
@@ -111,40 +116,47 @@ void __not_in_flash_func (core1Entry) (void)
 
     memset ( &sCMD, 0, sizeof (CommandDescriptorBlock) );
 
-    gpio_set_dir_in_masked (ACSI_DATA_MASK);
-    
-    IRQ_HI ();
-    DRQ_HI ();
-    dataBus (DISABLE);
-    disableInterrupts ();
+    disableInterrupts ();                       /* no interruptions please */
 
     for ( int i = 0; i < MAX_DRIVES; i++ )
     {
         drv [i].locked      = false;
-        //drv [i].mounted     = false;
         drv [i].packetCount = 0;
-        //drv [i].partTotal   = 0;
-        //drv [i].raw         = false;
         drv [i].ejected     = false;
         drv [i].prevState   = true;
     }
 
+#if ICD_RTC
     emudate ( "", 0 );                          /* initialise ICD RTC date/time array */
     emutime ( "", 0 );
+#endif
 
-    gpio_put ( CONTROL_BUS_CNTRL, HI );         /* enable control bus so we can listen for commands */
+    gpio_set_dir_in_masked (ACSI_DATA_MASK);
+
+#if DEBUG_IO
+    //checkIRQDRQ ();
+    checkInputs ();
+#endif
+
+#if PROJECT_HARDWARE
+    controlBus (ENABLE);                        /* enable control bus so we can listen for commands */
+    dataBus (DISABLE);
+#endif
+
+    IRQ_HI ();
+    DRQ_HI ();
 
     /* monitor ACSI bus */
     while ( 1 ) 
     {
         /* 
          * ATARI holds RST low for 12us 
-         *
          */
-        
+   
         if ( gpio_get ( RST ) == LO )
         {
             dataBus (DISABLE);
+
             IRQ_HI ();
             DRQ_HI ();
             
@@ -152,9 +164,9 @@ void __not_in_flash_func (core1Entry) (void)
 #if DEBUG
             printf ( "RESET\n" );
 #endif            
-            waitRST ();                         /* wait for RST to go high */
+            waitRST ();                         // wait for RST to go high 
         }
-        
+
         /* ============= */
         /* command phase */
         /* ============= */
@@ -166,15 +178,17 @@ void __not_in_flash_func (core1Entry) (void)
          * interrupts should be disabled for the duration of the CDB building at least
          * 
          */
-        
+
         if ( newCMD () ) 
         { 
-            dataBus (ENABLE);
+            dataBus (ENABLE); 
 
             waitCS ();                          /* wait for CS low */
+           
             sCMD.b [0] = rdDataBus ();          /* data is available to read now - byte 0 */
+            
             waitRW (LO);                        /* wait for RW to go high before continuing */
-
+            
             /* check this command is for this controller 
              * better to do in hardware with a switch selection ? */
             if ( sCMD.DEVICE.target == TARGET0 || sCMD.DEVICE.target == TARGET1 )
@@ -186,7 +200,9 @@ void __not_in_flash_func (core1Entry) (void)
                 waitA1 ();                      /* subsequent command bytes are read whilst A1 is high */
                 waitCS (); 
                 IRQ_HI ();  
+              
                 sCMD.b [1] = rdDataBus ();      /* byte 2 - check for special/extended commands */
+                
                 waitRW (LO);
                                                 /* we have a maximum of 12us to assert IRQ, starting....... now */
 
@@ -216,7 +232,9 @@ void __not_in_flash_func (core1Entry) (void)
                 {       
                     waitCS ();                  /* ATARI tells us another byte is ready */
                     IRQ_HI ();  
+                    
                     sCMD.b [d] = rdDataBus ();  /* bytes 2-n */
+                   
                     waitRW (LO);         
                                                 /* the last command byte does NOT assert IRQ */
                     if ( d == (sCMD.cmdLength - 1) )
@@ -225,12 +243,21 @@ void __not_in_flash_func (core1Entry) (void)
                     IRQ_LO ();                  /* tell ATARI we are ready for next byte */
                 }        
 
+                dataBus (DISABLE);
+
                 getCMD ( &sCMD );               /* process ACSI/SCSI command */
             }
 
+
 #if ICD_RTC
+#if !PROJECT_HARDWARE
             else if ( sCMD.DEVICE.target == TARGET6 && RTC_ENABLED )
             {
+#else
+            if ( RTC_ENABLED )
+            {
+#endif
+
                 memset ( ICDRTCbuff, 0, sizeof (ICDRTCbuff) );
 
                 ICDRTCbuff [0] = sCMD.b [0];       
@@ -238,16 +265,16 @@ void __not_in_flash_func (core1Entry) (void)
                 processICDRTC ();
             }
 #endif
-
             else                                /* ignore command, it wasn't for us */
             {                                   /* ATARI will timeout */
                 IRQ_HI ();
                 DRQ_HI ();
+
+                dataBus (DISABLE);              /* data-bus trisate */
             }
 
-            /* end of command */
-            dataBus (DISABLE);                  /* data-bus trisate */
-        }
+        } /* end of command */
+
     }
     
     return;
@@ -371,6 +398,7 @@ int main ( void )
 #ifdef DEBUG
     VERBOSE = true;
 #endif
+
     doPrint = false;                            /* flag to show if debug print is needed */
 
 #if ICD_RTC && DEBUG_ICDRTC
@@ -958,7 +986,7 @@ static inline void __not_in_flash_func (doStatus) ( uint8_t status )
 { 
     IRQ_LO ();                                  /* completes DMA (if any) */
     waitRW (LO);                                /* make sure RW is high = READ */
-    
+    dataBus (ENABLE);
     gpio_set_dir_out_masked (ACSI_DATA_MASK);
 
     waitCS ();
@@ -967,6 +995,7 @@ static inline void __not_in_flash_func (doStatus) ( uint8_t status )
     waitRW (HI);
     
     gpio_set_dir_in_masked (ACSI_DATA_MASK);
+    dataBus (DISABLE);
 }
 
 
@@ -986,7 +1015,7 @@ static inline uint8_t __not_in_flash_func (rdDMA) ( uint8_t *ptr, uint32_t lengt
     /* at end assert IRQ to complete transfer - done in doStatus () */
     
     waitWR ();                                  /* make sure RW is low (WRITE) */
-    
+    dataBus (ENABLE);
     gpio_set_dir_in_masked (ACSI_DATA_MASK);
     
     /* do the transfer as fast as we can - the ATARI is handling the handshaking */
@@ -995,7 +1024,9 @@ static inline uint8_t __not_in_flash_func (rdDMA) ( uint8_t *ptr, uint32_t lengt
 
         DRQ_LO ();
         waitACK (HI);
+        //dataBus (ENABLE);
         *ptr++ = rdDataBus ();
+        //dataBus (DISABLE);
         DRQ_HI ();
         waitACK (LO);
 
@@ -1011,6 +1042,8 @@ static inline uint8_t __not_in_flash_func (rdDMA) ( uint8_t *ptr, uint32_t lengt
             
     }
     
+    dataBus (DISABLE);
+
     return ERR_DRV_NO_ERROR;
 }
 
@@ -1031,6 +1064,7 @@ static inline uint8_t __not_in_flash_func (wrDMA) ( uint8_t *ptr, uint32_t lengt
     
     waitRD ();
     
+    dataBus (ENABLE);
     gpio_set_dir_out_masked (ACSI_DATA_MASK);   /* make data gpio pins outputs */
     
     /* do the transfer as fast as we can - the ATARI is handling the handshaking */
@@ -1050,6 +1084,7 @@ static inline uint8_t __not_in_flash_func (wrDMA) ( uint8_t *ptr, uint32_t lengt
     }
     
     gpio_set_dir_in_masked (ACSI_DATA_MASK);    /* make data gpio pins inputs */
+    dataBus (DISABLE);
 
     return ERR_DRV_NO_ERROR;
 }
@@ -1132,6 +1167,8 @@ static inline int rawWR ( CommandDescriptorBlock *cdb, DRIVES *drv )
     
     enableInterrupts ();
     
+    /* more of a dev option - inhibit writes if problems */
+    #if WRITE_ENABLE
     if ( ( e = sd_write_blocks ( drv->pSD, DMAbuffer, drv->lba, length )) != SD_BLOCK_DEVICE_ERROR_NONE )
     {
         drv->lastError.status = SCSI_ERR_WRITE;
@@ -1141,6 +1178,7 @@ static inline int rawWR ( CommandDescriptorBlock *cdb, DRIVES *drv )
     }
 
     else
+    #endif
     {
         drv->lastError.status = SCSI_ERR_OK;
         drv->status           = ERR_DRV_NO_ERROR;
@@ -1184,9 +1222,9 @@ static void    processICDRTC ( void )
     uint8_t ICDcmd;
     uint8_t ICDdata;
     uint8_t reg;
-    uint8_t ix  = 0;
+    uint8_t ix          = 0;
     bool    expectWrite = false;
-    uint8_t cmd = ICDRTCbuff [0] & 0x1f;
+    uint8_t cmd         = ICDRTCbuff [0] & 0x1f;
 
 
     switch ( cmd )
@@ -1200,7 +1238,9 @@ static void    processICDRTC ( void )
             {       
                 waitCS (); 
                 IRQ_HI ();  
+                dataBus (ENABLE);
                 ICDRTCbuff [d] = rdDataBus ();
+                dataBus (DISABLE);
                 waitRW (LO);         
                 
                 if ( d == 5 )
@@ -1242,7 +1282,9 @@ static void    processICDRTC ( void )
             {       
                 waitCS (); 
                 IRQ_HI ();  
+                dataBus (ENABLE);
                 ICDRTCbuff [d] = rdDataBus ();
+                dataBus (DISABLE);
                 waitRW (LO);         
                 
                 if ( d == 5 )
@@ -1279,7 +1321,9 @@ static void    processICDRTC ( void )
             {
                 waitCS ();
                 IRQ_HI ();
+                dataBus (ENABLE);
                 ICDcmd = rdDataBus ();
+                dataBus (DISABLE);
                 waitRW (LO);
 
                 ICDRTCbuff [ix++] = ICDcmd;
@@ -1358,3 +1402,57 @@ static void    printICDRTCbuff ( void )
 #endif
 
 #endif
+
+/* ------------------------------------------------------------------------- */
+
+/* GPIO tests */
+
+/* Check IRQ and DRQ outputs */
+void checkIRQDRQ ( void )
+{
+    int i = 0;
+
+    controlBus (DISABLE);
+    dataBus (DISABLE);
+    
+    IRQ_HI ();
+    DRQ_HI ();
+    
+    while (1)
+    {
+        gpio_xor_mask (1<<IRQ);
+
+        if ( i++ % 2 )
+            gpio_xor_mask (1<<DRQ);
+
+        sleep_us (1000);
+    }
+
+    return;
+}
+
+
+void checkInputs ( void )
+{
+    uint32_t all;
+
+    controlBus (ENABLE);
+    dataBus (ENABLE);
+
+    while (1)
+    {
+        all = gpio_get_all ();
+        
+        printf ( "\e[1;1H\e[2J" );
+        printf ( "A1  RW  CS  ACK  RST\n" );
+        printf ( "%d   %d   %d   %d    %d    0x%04x\r", 
+            all & (1 << A1) ? 1 : 0,
+            all & (1 << RW) ? 1 : 0,
+            all & (1 << CS) ? 1 : 0,
+            all & (1 << ACK) ? 1 : 0,
+            all & (1 << RST) ? 1 : 0,
+            all & 0x0000ffff );
+        
+        sleep_ms (5);
+    }
+}

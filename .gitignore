@@ -14,3 +14,5 @@
 ../../no-OS-FatFS
 pico-sdk
 tinyusb
+tmp.*
+junk.*

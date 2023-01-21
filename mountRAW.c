@@ -260,35 +260,32 @@ int mountRAW ( int disk )
     int status;
     sd_card_t *pdrv; 
 
+     
+    drv [disk].pSD = &sd_cards [disk];
 
-    //for ( int n = 0; n < MAX_DRIVES; n++ )
-    //{        
-        drv [disk].pSD = &sd_cards [disk];
+    pdrv = drv [disk].pSD;
 
-        pdrv = drv [disk].pSD;
+    if ( (gpio_get (pdrv->card_detect_gpio) == pdrv->card_detected_true) && (pdrv->mounted == false) )    /* check micro-sd card is inserted */
+    {
+        sleep_ms (1);
 
-        if ( gpio_get (pdrv->card_detect_gpio) == false && pdrv->mounted == false )    /* check micro-sd card is inserted */
+        if ( (status = sd_init_card ( pdrv ) ) == 0 )
         {
-            sleep_ms (1);
-
-            if ( (status = sd_init_card ( pdrv ) ) == 0 )
-            {
-                drv [disk].diskSize = rawPartitionCount ( pdrv );
-                printf ( "%s diskSize = %d\n", __func__, drv [disk].diskSize );
-                
-                if ( pdrv->mounted )
-                {
-                    printf ( "\n%s mounted\n\n", pdrv->pcName );
-                    t++;
-                }
-            }
+            drv [disk].diskSize = rawPartitionCount ( pdrv );
+            printf ( "%s diskSize = %d\n", __func__, drv [disk].diskSize );
             
-            else
+            if ( pdrv->mounted )
             {
-                printf ( "\nERROR: mountRAW init card failed on %s\n", pdrv->pcName );
+                printf ( "\n%s mounted\n\n", pdrv->pcName );
+                t++;
             }
         }
-    //}  
+        
+        else
+        {
+            printf ( "\nERROR: mountRAW init card failed on %s\n", pdrv->pcName );
+        }
+    } 
     
     return t;                                   /* return number of mounted drives */
 }

@@ -11,11 +11,11 @@ This is in know way the finished article. I have uploaded to git simply because 
 Both PICO CPU cores are used. Core 2 is solely used for decoding command packets. Core 1, prints command data and live status. 
 
 Note the shell... you can do things whilst the emulator is doing its stuff. At the moment, there isn't much. Just date, time reporting. But partition dumps could be performed, partitioning and formatting sd cards etc.
-  
-The SPI clock speed is dependent upon the chosen sd-card adapter/breakout board. My initial part would not excede 15 MHz. My replacement part attains 41 MHz.
 
-The CPU is over-clocked at 150 MHz to get optimum performance. Higher CPU speeds have been tested, up to 300 MHz, but do not offer significant transfer speed increases.
-The interface works happily at the default PICO CPU clock of 125 MHz.
+Revised Hardware design
+The TXB0108 part is not suitable for this project. A 74xxx245 part is needed as I used in the prototype. Why oh why did I change it !!!
+
+
 
 
 ### Latest Improvements:

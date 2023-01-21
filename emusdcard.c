@@ -33,8 +33,8 @@ spi_t spis[] = {                        // One for each SPI.
         .sck_gpio    = SPI_CLK,         // CLK
 
         /* 
-         * The choice of SD card may matter 
-         * Samsung EVO Plus 24MHz and 50MHz (CPU CLOCK needs to be 133MHz) tested OK
+         * The choice of SD card does matter 
+         * Samsung EVO Plus 24MHz and 50MHz (CPU CLOCK needs to be 200 MHz) tested OK
          */
         .baud_rate   = 50 * MHZ,
                                         // Following attributes are dynamically assigned
@@ -66,7 +66,7 @@ sd_card_t sd_cards[] = {         // One for each SD card
         .spi                = &spis[0], // Pointer to the SPI driving this card
         .ss_gpio            = MICROSD_CARD_CS1, // The SPI slave select GPIO for this SD card
         .card_detect_gpio   = MICROSD_CARD_CD1,        // Card detect
-        .card_detected_true = false,       // What the GPIO read returns when a card is
+        .card_detected_true = false,      // What the GPIO read returns when a card is
                                         // present. Use -1 if there is no card detect.
         .use_card_detect    = true,
                                         // Following attributes are dynamically assigned
