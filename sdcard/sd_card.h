@@ -19,6 +19,7 @@ specific language governing permissions and limitations under the License.
 #define _SD_CARD_H_
 
 #include <stdint.h>
+#include <pico/time.h>
 #include "hardware/gpio.h"
 #include "spi.h"
 
