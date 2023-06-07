@@ -35,7 +35,7 @@ int EMUinit ( void )
                       clock_get_hz ( clk_sys ) );
     
     stdio_init_all ();                          /* CMakeLists.txt assigns serial out device - USB / UART */
-    sleep_ms ( 3000 );                          /* give time to minicom (or similar) to establish comms */
+    sleep_ms ( 5000 );                          /* give time to minicom (or similar) to establish comms */
 
     /* initialise GPIO pins */
     gpio_init_mask         ( GPIO_MASK );       /* initialise all GPIO pins for this project - initially all inputs */
