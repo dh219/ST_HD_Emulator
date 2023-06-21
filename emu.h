@@ -276,7 +276,7 @@ Pin	Name	Description
 #define DRQ_LO()            gpio_put (DRQ, LO);
 #define DRQ_HI()            gpio_put (DRQ, HI);
 
-#define dataBus(s)          gpio_put (DATA_BUS_CNTRL, s)
+#define dataBus(s)          gpio_put (DATA_BUS_CNTRL, !s)
 #define newCMD()            gpio_get (A1) == LO && gpio_get (RW) == LO // future will be gpio_get (CONTROLLER_SELECT) == HI
 #define rdDataBus()         (gpio_get_all () & ACSI_DATA_MASK)
 #define wrDataBus(d)        gpio_put_masked ( ACSI_DATA_MASK, (d) )

@@ -61,8 +61,8 @@ int EMUinit ( void )
     gpio_set_drive_strength ( IRQ, GPIO_DRIVE_STRENGTH_4MA ); 
     gpio_set_drive_strength ( DRQ, GPIO_DRIVE_STRENGTH_4MA ); 
 
-    gpio_put ( DATA_BUS_CNTRL,    LO );
-    gpio_put ( CONTROL_BUS_CNTRL, LO );
+    gpio_put ( DATA_BUS_CNTRL,    HI );
+    gpio_put ( CONTROL_BUS_CNTRL, HI );
     gpio_put ( IRQ,               HI );
     gpio_put ( DRQ,               HI );
 

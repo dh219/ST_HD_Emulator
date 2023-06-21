@@ -132,7 +132,7 @@ void __not_in_flash_func (core1Entry) (void)
     emudate ( "", 0 );                          /* initialise ICD RTC date/time array */
     emutime ( "", 0 );
 
-    gpio_put ( CONTROL_BUS_CNTRL, HI );         /* enable control bus so we can listen for commands */
+    gpio_put ( CONTROL_BUS_CNTRL, LO );         /* enable control bus so we can listen for commands */
 
     /* monitor ACSI bus */
     while ( 1 ) 
@@ -343,7 +343,6 @@ static inline void printCmd ( CommandDescriptorBlock *CDB, int status )
     }
 
     sprintf ( debugLine + strlen (debugLine), "\b \b) (%02x)\n", status );
-    
     printf ( debugLine );                       /* one printf to stdio */
 }
 
@@ -589,6 +588,7 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
             break;
 
         case CMD_WRITE:            
+
             if ( ! pdrv->pSD->mounted || LUN != 0 ) 
             {
                 pdrv->lastError.SK     = SCSI_SK_NOT_READY;
@@ -596,11 +596,9 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
                 pdrv->lastError.ASCQ   = SCSI_ASCQ_NO_ADDITIONAL_SENSE_INFORMATION;
                 pdrv->status           = ERR_DRV_DRV_NOT_READY;
             }
-
             else 
             {
                 pdrv->lba = (uint32_t)CDB->BYTE1.msbLBA << 16 | (uint32_t)CDB->mid << 8 | CDB->lsb;
-
                 rawWR ( CDB, pdrv );
             }
 
