@@ -170,7 +170,7 @@ Pin	Name	Description
 
 /* build options */
 #define DEBUG               1                   /* enable debug stuff */
-#define ICD_RTC             1                   /* include ICD RTC - will only be used if ICD driver is used */
+#define ICD_RTC             0                   /* include ICD RTC - will only be used if ICD driver is used */
 #define DEBUG_ICDRTC        0                   /* ICD RTC debug */
 #define USEDMA              1                   /* use DMA transfers for SPI - sdcard/spi.h also needs this define */
 #define PROJECT_HARDWARE    0                   /* set when using project hardware */
@@ -285,7 +285,8 @@ Pin	Name	Description
                                     gotRST = true;          \
                             }
 #define checkCS()           while ( gpio_get ( CS ) == LO )
-#define waitCS()            while ( gpio_get ( CS ) == HI )
+//#define waitCS()            while ( gpio_get ( CS ) == HI )
+#define waitCS(s)           while ( gpio_get ( CS ) != s )
 #define waitRW(s)           while ( gpio_get ( RW ) == s )
 #define waitACK(s)          while ( gpio_get ( ACK ) == s )
 #define waitRD()            while ( gpio_get ( RW ) == LO )

@@ -53,18 +53,6 @@ static int     rawWR    ( CommandDescriptorBlock *, DRIVES * );
 static uint8_t rdDMA    ( uint8_t *, uint32_t );
 static uint8_t wrDMA    ( uint8_t *, uint32_t );
 
-#if ICD_RTC
-static void    processICDRTC   ( void );
-
-#if DEBUG_ICDRTC
-static void    printICDRTCbuff ( void );
-volatile bool  doPrintICDRTCbuff;
-#endif
-
-uint8_t ICDRTCbuff [128];
-#endif
-
-
 /* 64 bytes */
 uint8_t INQUIRY_DATA [] =
 {
@@ -171,9 +159,9 @@ void __not_in_flash_func (core1Entry) (void)
         { 
             dataBus (ENABLE);
 
-            waitCS ();                          /* wait for CS low */
+            waitCS(LO);                          /* wait for CS low */
             sCMD.b [0] = rdDataBus ();          /* data is available to read now - byte 0 */
-            waitRW (LO);                        /* wait for RW to go high before continuing */
+            waitCS(HI);
 
             /* check this command is for this controller 
              * better to do in hardware with a switch selection ? */
@@ -184,10 +172,10 @@ void __not_in_flash_func (core1Entry) (void)
                 IRQ_LO ();                      /* assert IRQ to tell ATARI to continue */
 
                 waitA1 ();                      /* subsequent command bytes are read whilst A1 is high */
-                waitCS (); 
+                waitCS (LO); 
                 IRQ_HI ();  
                 sCMD.b [1] = rdDataBus ();      /* byte 2 - check for special/extended commands */
-                waitRW (LO);
+                waitCS(HI);
                                                 /* we have a maximum of 12us to assert IRQ, starting....... now */
 
                 if ( sCMD.DEVICE.opcode == 0x1f ) /* ACSI commands use 5 bits, highest ACSI command is 0x1f */
@@ -214,10 +202,10 @@ void __not_in_flash_func (core1Entry) (void)
 
                 for ( int d = 2; d < sCMD.cmdLength; d++ )
                 {       
-                    waitCS ();                  /* ATARI tells us another byte is ready */
+                    waitCS (LO);                  /* ATARI tells us another byte is ready */
                     IRQ_HI ();  
                     sCMD.b [d] = rdDataBus ();  /* bytes 2-n */
-                    waitRW (LO);         
+                    waitCS(HI);   
                                                 /* the last command byte does NOT assert IRQ */
                     if ( d == (sCMD.cmdLength - 1) )
                         break;
@@ -225,29 +213,20 @@ void __not_in_flash_func (core1Entry) (void)
                     IRQ_LO ();                  /* tell ATARI we are ready for next byte */
                 }        
 
+                dataBus (DISABLE);
+
                 getCMD ( &sCMD );               /* process ACSI/SCSI command */
             }
-
-#if ICD_RTC
-            else if ( sCMD.DEVICE.target == TARGET6 && RTC_ENABLED )
-            {
-                memset ( ICDRTCbuff, 0, sizeof (ICDRTCbuff) );
-
-                ICDRTCbuff [0] = sCMD.b [0];       
-
-                processICDRTC ();
-            }
-#endif
-
             else                                /* ignore command, it wasn't for us */
             {                                   /* ATARI will timeout */
                 IRQ_HI ();
                 DRQ_HI ();
+                dataBus (DISABLE);              /* data-bus trisate */
             }
 
-            /* end of command */
-            dataBus (DISABLE);                  /* data-bus trisate */
-        }
+            memset ( &sCMD, 0, sizeof (CommandDescriptorBlock) );   /* clear the command block */
+
+        } /* end of command */
     }
     
     return;
@@ -956,15 +935,16 @@ static inline void __not_in_flash_func (doStatus) ( uint8_t status )
 { 
     IRQ_LO ();                                  /* completes DMA (if any) */
     waitRW (LO);                                /* make sure RW is high = READ */
-    
+    dataBus (ENABLE);
     gpio_set_dir_out_masked (ACSI_DATA_MASK);
 
-    waitCS ();
+    waitCS (LO);
     IRQ_HI ();
     wrDataBus ( status );
     waitRW (HI);
     
     gpio_set_dir_in_masked (ACSI_DATA_MASK);
+    dataBus (DISABLE);
 }
 
 
@@ -1067,9 +1047,6 @@ static inline int rawRD ( CommandDescriptorBlock *cdb, DRIVES *drv )
     if ( cdb->cmdLength == 6 )
     {
         length = cdb->len;
-
-        if ( length == 0 )
-            length = 256;
     }
 
     /* SCSI (10) read */
@@ -1078,9 +1055,10 @@ static inline int rawRD ( CommandDescriptorBlock *cdb, DRIVES *drv )
         length = drv->len;
     }
 
+    if ( length == 0 )
+        return 0;
+    
     /* TODO check for length > 256 as exceded DMAbuffer size */
-
-    enableInterrupts ();
 
     if ( ( e = sd_read_blocks ( drv->pSD, DMAbuffer, drv->lba, length )) != SD_BLOCK_DEVICE_ERROR_NONE )
     {
@@ -1092,15 +1070,13 @@ static inline int rawRD ( CommandDescriptorBlock *cdb, DRIVES *drv )
 
     else 
     {
-        disableInterrupts ();
-
+        dataBus (ENABLE);
         wrDMA ( DMAbuffer, length << 9 );
+        dataBus (DISABLE);
 
         drv->lastError.status = SCSI_ERR_OK; 
         drv->status           = ERR_DRV_NO_ERROR;
     }
-
-    disableInterrupts ();
 }
 
 
@@ -1114,9 +1090,6 @@ static inline int rawWR ( CommandDescriptorBlock *cdb, DRIVES *drv )
     if ( cdb->cmdLength == 6 )
     {
         length = cdb->len;
-
-        if ( length == 0 )
-            length = 256;
     }
 
     else
@@ -1124,235 +1097,29 @@ static inline int rawWR ( CommandDescriptorBlock *cdb, DRIVES *drv )
         length = drv->len;
     }
     
-    disableInterrupts ();
+    drv->lastError.status = SCSI_ERR_OK;
+    drv->status           = ERR_DRV_NO_ERROR;
+
+    if( length == 0 )
+        return 0;
                 
-    rdDMA ( DMAbuffer, length << 9 );
-    
-    enableInterrupts ();
-    
-    if ( ( e = sd_write_blocks ( drv->pSD, DMAbuffer, drv->lba, length )) != SD_BLOCK_DEVICE_ERROR_NONE )
+    dataBus (ENABLE);
+
+    uint32_t offset = drv->lba;
+    for ( uint32_t i = 0; i < length; i++ )
     {
-        drv->lastError.status = SCSI_ERR_WRITE;
-        drv->status           = ERR_CNTRL_DATA_NOT_FOUND;
+        offset += i;
+        rdDMA ( DMAbuffer, 512 );
 
-        printf ( "WRITE: write failed %d, len = %d\n", e, length );
-    }
-
-    else
-    {
-        drv->lastError.status = SCSI_ERR_OK;
-        drv->status           = ERR_DRV_NO_ERROR;
-    }
-
-    disableInterrupts ();
-}
-
-/* ------------------------------------------------------------------------- */
-
-#if ICD_RTC
-
-#define ICD_BEGIN   0xc0
-#define ICD_READ    0x80
-#define ICD_END     0x40
-#define ICD_SELECT  0x20
-#define ICD_WRITE   0x10
-
-#define ICDREGS     13
-
-/* initialise ICD RTC to 25/12/22 23:34:12 */
-uint8_t ICDreg [ICDREGS] = 
-{
-    2,                                          /* seconds low  */
-    1,                                          /* seconds high */
-    4,                                          /* minutes low  */
-    3,                                          /* minutes high */
-    3,                                          /* hours low    */
-    2,                                          /* hours high   */
-    0,                                          /* day of week (0-6) - NOT USED */
-    5,                                          /* day low      */
-    2,                                          /* day high     */
-    2,                                          /* month low    */
-    1,                                          /* month high   */
-    2,                                          /* year low     */
-    4 //12                                          /* year high - from 1980, so 4 * 10 = 40 = 2020 + year low */
-};
-
-static void    processICDRTC ( void )
-{
-    uint8_t ICDcmd;
-    uint8_t ICDdata;
-    uint8_t reg;
-    uint8_t ix  = 0;
-    bool    expectWrite = false;
-    uint8_t cmd = ICDRTCbuff [0] & 0x1f;
-
-
-    switch ( cmd )
-    {
-        case REQUEST_SENSE:
-
-            IRQ_LO ();
-            waitA1 (); 
-
-            for ( int d = 1; d < 6; d++ )
-            {       
-                waitCS (); 
-                IRQ_HI ();  
-                ICDRTCbuff [d] = rdDataBus ();
-                waitRW (LO);         
-                
-                if ( d == 5 )
-                    break;
-                                    
-                IRQ_LO ();
-            } 
-
-            memset ( DMAbuffer, 0, ICDRTCbuff [4] );
-
-            DMAbuffer [0] = 0x70;   
-            DMAbuffer [1] = 0;
-            DMAbuffer [2] = SCSI_SK_NO_SENSE; 
-            DMAbuffer [3] = 0;
-            DMAbuffer [7] = 12;
-            DMAbuffer [8]  = 0;
-            DMAbuffer [9]  = 0x0a;
-            DMAbuffer [10] = 0x80; 
-            DMAbuffer [11] = 0; 
-            DMAbuffer [12] = SCSI_ASC_NO_ADDITIONAL_SENSE;
-            DMAbuffer [13] = SCSI_ASCQ_NO_ADDITIONAL_SENSE_INFORMATION;
-            DMAbuffer [14] = 0;
-            DMAbuffer [15] = 0;
-            DMAbuffer [16] = 0;
-            DMAbuffer [17] = 0;
-            DMAbuffer [18] = 0; 
-            DMAbuffer [19] = 0;               
-
-            wrDMA ( DMAbuffer, ICDRTCbuff [4] );
-
+        if ( ( e = sd_write_blocks ( drv->pSD, DMAbuffer, offset, 1 ) ) != SD_BLOCK_DEVICE_ERROR_NONE )
+        {
+            drv->lastError.status = SCSI_ERR_WRITE;
+            drv->status           = ERR_CNTRL_DATA_NOT_FOUND;
+            printf ( "WRITE: write failed %d, len = %d\n", e, length );
             break;
-
-        case CMD_INQUIRY:
-
-            IRQ_LO ();
-            waitA1 (); 
-
-            for ( int d = 1; d < 6; d++ )
-            {       
-                waitCS (); 
-                IRQ_HI ();  
-                ICDRTCbuff [d] = rdDataBus ();
-                waitRW (LO);         
-                
-                if ( d == 5 )
-                    break;
-                                    
-                IRQ_LO ();
-            } 
-
-            memcpy ( DMAbuffer, INQUIRY_DATA, sizeof (INQUIRY_DATA) );
-
-            DMAbuffer [0] = 0x0e;               /* simplified direct access device */
-            DMAbuffer [1] = 0x00;               /* fixed */
-
-            memcpy ( DMAbuffer + 8, "ICD     REAL TIME CLOCK ", 24 );
-
-            if ( ICDRTCbuff [4] < 64 )
-                DMAbuffer [4] = ICDRTCbuff [4] - 5;
-            
-            wrDMA ( DMAbuffer, ICDRTCbuff [4] );
-
-            sleep_us (1);
-            doStatus (0);
-
-            break;
-
-        case TEST_UNIT_READY:
-
-            ix = 1;
-
-            IRQ_LO ();
-            waitA1 ();
-
-            while ( ix < sizeof (ICDRTCbuff) )
-            {
-                waitCS ();
-                IRQ_HI ();
-                ICDcmd = rdDataBus ();
-                waitRW (LO);
-
-                ICDRTCbuff [ix++] = ICDcmd;
-
-                if ( ICDcmd == ICD_END )
-                {
-                    break;
-                }
-
-                IRQ_LO ();
-
-                if ( ICDcmd == ICD_BEGIN )//|| ICDcmd == 0x00 || ICDcmd == 0xff )
-                {
-                    continue;
-                }
-
-                if ( (ICDcmd & 0xf0) == (ICD_BEGIN | ICD_SELECT) )
-                {
-                    reg = ICDcmd & 0x0f;
-                }
-
-                else if ( (ICDcmd & 0xf0) == ICD_READ )
-                {
-                    sleep_us (1);
-                    doStatus ( ICDreg [reg] );
-                }
-                
-                else if ( (ICDcmd & 0xf0) == (ICD_BEGIN | ICD_WRITE) )
-                {
-                    ICDdata = ICDcmd & 0x0f;
-                    expectWrite = true;
-                }
-                
-                else if ( expectWrite )
-                {
-                    expectWrite = false;
-                    ICDreg [reg] = ICDdata;
-                }
-            }
-
-            doStatus (0);
-#if DEBUG_ICDRTC
-            doPrintICDRTCbuff = true;
-#endif   
-            break;
-
-        default:
-            sleep_us (1);
-            doStatus (2);
-            printf ( "%s: need to handle command 0x%02x\n", __func__, cmd );
-#if DEBUG_ICDRTC
-            doPrintICDRTCbuff = true;
-#endif
-            break;
-    }
-
-}
-
-
-#if DEBUG_ICDRTC
-static void    printICDRTCbuff ( void )
-{
-    for ( int i = 0; i < 128; i++ )
-    {
-        if ( i % 16 == 0 )
-            printf ( "\n" );
-
-        printf ( "%02x ", ICDRTCbuff [i] );
-
-        if ( ICDRTCbuff [i] == 0x40 )
-            break;
+        }
     }
     
-    printf ( "\n" );
-}
-#endif
+    dataBus (DISABLE);
 
-#endif
+}
