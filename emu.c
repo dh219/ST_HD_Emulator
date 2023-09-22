@@ -410,13 +410,12 @@ int main ( void )
     return 0;
 }
 
-
-
 static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
 {  
     register uint8_t LUN;
     register uint8_t TARGET;
     DRIVES  *pdrv;
+    int length;
    
 
     /* ============= */
@@ -567,7 +566,6 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
             break;
 
         case CMD_WRITE:            
-
             if ( ! pdrv->pSD->mounted || LUN != 0 ) 
             {
                 pdrv->lastError.SK     = SCSI_SK_NOT_READY;
@@ -580,7 +578,6 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
                 pdrv->lba = (uint32_t)CDB->BYTE1.msbLBA << 16 | (uint32_t)CDB->mid << 8 | CDB->lsb;
                 rawWR ( CDB, pdrv );
             }
-
             break;
 
         /* don't need this command */
@@ -599,37 +596,60 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
             pdrv->lastError.status = SCSI_ERR_OK; 
             pdrv->status           = ERR_DRV_NO_ERROR;
                
+            memset ( DMAbuffer, 0, 64 );
             memcpy ( DMAbuffer, INQUIRY_DATA, sizeof (INQUIRY_DATA) );
 
+            if ( CDB->len > 4 )
             {
-                char num [9];
-                int diskSize = (float)((float)(pdrv->pSD->sectors * 512) / 1000.0 / 1000.0 / 1000.0) + 0.5;
+                char num [6];
+                int diskSize = ( (pdrv->diskSize * 512) / 1024 / 1024 );// + 1;
+                
+                if ( pdrv->pSD->mounted )
+                {           
+                    sprintf ( num, "%dMB", diskSize ); 
+                    memcpy ( &DMAbuffer [24], num, strlen (num) );
+                }
 
-                sprintf ( num, "%3d", diskSize );                
+                else
+                {
+                    memcpy ( &DMAbuffer [24], "EMPTY", 5 );
 
-                DMAbuffer [24] = '0' + (TARGET - CONTROLLER_ID);  /* alter the disk number in product revision field */
-                DMAbuffer [26] = num [0];
-                DMAbuffer [27] = num [1];
-                DMAbuffer [28] = num [2];
-                DMAbuffer [29] = ' ';
-                DMAbuffer [30] = 'G';
-                DMAbuffer [31] = 'B';
+                    DMAbuffer [0] = 0x01 << 5;  /* device is not usable */
+                }
 
-                memcpy ( &DMAbuffer [32], VERSION, 4 );         /* include firmware revision */
-
-                DMAbuffer [39] = '0' + (TARGET - CONTROLLER_ID);/* alter drive serial number */
-                DMAbuffer [0] = 0x00;       /* device connected and is a direct access block device */
+                DMAbuffer [22] = '0' + (TARGET - CONTROLLER_ID);
+                memcpy ( &DMAbuffer [32], VERSION, 4 );  /* include firmware revision */
 
                 if ( LUN != 0 )
-                    DMAbuffer [0] = 0x7f;       /* this is causing me problems ??? hangs bus */
+                    DMAbuffer [0] = 0x7f;       /* LUN other than 0 is not supported */
+
+                length = 64;
             }
 
-            if ( CDB->len < 64 )
-                DMAbuffer [4] = CDB->len - 5;
-                
-            wrDMA ( DMAbuffer, CDB->len );
+            else
+            {
+                if ( ! pdrv->pSD->mounted )
+                    DMAbuffer [0] = 0x01 << 5;  /* device is not usable */
 
-            break;
+                else if ( LUN != 0 )
+                    DMAbuffer [0] = 0x7f;       /* LUN other than 0 is not supported */
+
+                length = CDB->len;
+            }
+           
+            gpio_set_dir_out_masked (ACSI_DATA_MASK);   /* make data gpio pins outputs */
+
+            DRQ_HI ();
+            waitACK (LO);
+
+            dataBus (ENABLE);
+
+            wrDMA ( DMAbuffer, length );
+
+            dataBus (DISABLE);
+
+            gpio_set_dir_in_masked (ACSI_DATA_MASK);
+            break;            
 
         /* 
          * non-ACSI, 
@@ -913,7 +933,7 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
     /* ============= */
 
 #if DEBUG 
-    if (VERBOSE)
+    if (1||VERBOSE)
     {
         memcpy ( &gCDB, CDB, sizeof (CommandDescriptorBlock) );
         gStatus = ( pdrv->status );
@@ -928,9 +948,6 @@ static inline int __not_in_flash_func (getCMD) ( CommandDescriptorBlock *CDB )
     return 1;
 }
 
-
-
-/* return command status (one byte) to ATARI */
 static inline void __not_in_flash_func (doStatus) ( uint8_t status )
 { 
     IRQ_LO ();                                  /* completes DMA (if any) */
@@ -946,7 +963,6 @@ static inline void __not_in_flash_func (doStatus) ( uint8_t status )
     gpio_set_dir_in_masked (ACSI_DATA_MASK);
     dataBus (DISABLE);
 }
-
 
 
 /*
@@ -1096,30 +1112,48 @@ static inline int rawWR ( CommandDescriptorBlock *cdb, DRIVES *drv )
     {                        
         length = drv->len;
     }
+
+    if ( length == 0 )
+    {
+        printf ( "rawWR: 0 count\n" );
+        return 0;
+    }
+
+    else if ( length << 9 > sizeof (DMAbuffer) )
+    {
+        printf ( "rawWR: too big - length = %u sectors\n", length << 9 );
+        return 0;
+    }    
     
     drv->lastError.status = SCSI_ERR_OK;
     drv->status           = ERR_DRV_NO_ERROR;
 
-    if( length == 0 )
-        return 0;
-                
+    gpio_set_dir_in_masked (ACSI_DATA_MASK);
+
+    waitA1 ();
+    waitRW (HI);
+    DRQ_HI ();
+    waitACK (LO);
+
     dataBus (ENABLE);
 
-    uint32_t offset = drv->lba;
-    for ( uint32_t i = 0; i < length; i++ )
+    /* inefficient method but needed to minimise DMA issues, well at least attempt to */
+    for ( uint32_t n = 0; n < length; n++ )
     {
-        offset += i;
         rdDMA ( DMAbuffer, 512 );
 
-        if ( ( e = sd_write_blocks ( drv->pSD, DMAbuffer, offset, 1 ) ) != SD_BLOCK_DEVICE_ERROR_NONE )
+        if ( ( e = sd_write_blocks ( drv->pSD, DMAbuffer, drv->lba + n, 1 ) ) != SD_BLOCK_DEVICE_ERROR_NONE )
         {
-            drv->lastError.status = SCSI_ERR_WRITE;
-            drv->status           = ERR_CNTRL_DATA_NOT_FOUND;
-            printf ( "WRITE: write failed %d, len = %d\n", e, length );
+            drv->lastError.SK   = SCSI_SK_MEDIUM_ERROR;
+            drv->lastError.ASC  = SCSI_ASC_WRITE_ERROR;
+            drv->lastError.ASCQ = SCSI_ASCQ_NO_ADDITIONAL_SENSE_INFORMATION;
+            drv->status         = CHECK_CONDITION;
+
+            printf ( "WRITE: write failed %d, LBA = 0x%x, length = 0x%x\n", e, drv->lba, length );
+
             break;
         }
     }
-    
-    dataBus (DISABLE);
 
+    dataBus (DISABLE);
 }
